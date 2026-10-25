@@ -84,6 +84,8 @@ Defina um **limite de gasto mensal** nos dois painéis. Cada pedido faz cerca de
 cd app && python3 -m http.server 8000   # abra http://localhost:8000
 ```
 
+> **Primeira vez?** Siga o [guia passo a passo](GUIA.md).
+
 ## Nuvem: celular, tablet e computador juntos (Firebase)
 
 Você entra com sua conta (Google ou e-mail) e os mesmos projetos aparecem em
