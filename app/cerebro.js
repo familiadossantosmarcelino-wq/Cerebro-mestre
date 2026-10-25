@@ -125,29 +125,57 @@ function provedor(cfg, ia) {
 
 // ------------------------------------------------------------------ prompts
 
+// Regras de escrita que valem para tudo que vai para o usuário. O objetivo é que
+// o texto pareça escrito por um engenheiro experiente, não por uma IA.
+export const ESTILO = `COMO ESCREVER (obrigatório):
+- Escreva como um engenheiro experiente falando com um colega de trabalho:
+  frases curtas, voz ativa, palavras simples, vocabulário de chão de fábrica.
+- A primeira frase já é a resposta. Sem introdução, sem repetir a pergunta.
+- Tamanho proporcional ao pedido. Pergunta simples, resposta curta.
+- Use lista só para passos ou itens que são realmente uma lista. Título só se o
+  texto for longo. Tabela só quando comparar valores ou montar um formulário.
+- Negrito no máximo em 2 ou 3 termos-chave. Nenhum emoji.
+- Não use travessão (—) para emendar frases; use ponto ou vírgula.
+- PROIBIDO: "Claro!", "Ótima pergunta", "Certamente", "Com certeza",
+  "É importante ressaltar/destacar", "Vale lembrar/destacar", "Em resumo",
+  "Em conclusão", "Em suma", "No cenário atual", "Mergulhar", "Robusto",
+  "Abrangente", "Desbloquear", "Espero ter ajudado", "Se precisar de mais algo",
+  oferecer ajuda no final, perguntar se quer mais, falar que é uma IA, citar
+  Claude, GPT, "a equipe" ou "os modelos".
+- Quando algo não for confirmado, diga de forma natural ("isso depende do
+  fabricante", "não achei fonte confiável para esse valor, confirme em campo").`;
+
 function regras(cfg) {
-  return `Você faz parte do "Cérebro Mestre": Claude e GPT trabalhando JUNTOS, como uma
-equipe, para entregar ao usuário a melhor resposta possível. Não há disputa entre
-vocês: cada um contribui com o que tem de melhor e o resultado é um só.
+  return `Você trabalha em dupla com outra IA (Claude e GPT) num projeto do usuário.
+Não há disputa: cada um contribui com o que tem de melhor e o resultado é um só.
 
 Perfil do usuário: ${cfg.perfil || "não informado"}
 
-Regras:
-- Português do Brasil, tom técnico, direto e explicativo.
+Regras de conteúdo:
+- Português do Brasil, técnico e prático. Pense no que funciona na planta, em campo.
 - Não invente fatos, dados, normas ou fontes. Se não souber, diga.
-- Diferencie claramente FATO de SUPOSIÇÃO.
-- Priorize respostas práticas e aplicáveis.`;
+- Separe o que é fato confirmado do que é suposição ou recomendação sua.`;
 }
 
 function contextoBase(entrada) {
-  let t = "";
-  if (entrada.contextoProjeto) t += `CONTEXTO DO PROJETO "${entrada.projeto}":\n${entrada.contextoProjeto}\n\n`;
+  let t = `PROJETO: ${entrada.projeto}\n`;
+  if (entrada.contextoProjeto) t += `OBJETIVO / CONTEXTO DO PROJETO:\n${entrada.contextoProjeto}\n\n`;
   if (entrada.historico?.length) {
-    t += "PERGUNTAS ANTERIORES NESTE PROJETO (resumo):\n";
-    for (const h of entrada.historico) t += `- P: ${h.pergunta}\n  R: ${h.resposta.slice(0, 1200)}\n`;
-    t += "\n";
+    t += "O QUE JÁ FOI FEITO NESTE PROJETO (do mais antigo ao mais recente):\n";
+    for (const h of entrada.historico) t += `- Pedido: ${h.pergunta}\n  Resultado: ${h.resposta.slice(0, 2500)}\n`;
+    t += "\nContinue a partir disso. Não repita o que já está decidido, a menos que o pedido mude algo.\n\n";
   }
-  return t + `DEMANDA DO USUÁRIO:\n${entrada.pergunta}\n`;
+  return t + `PEDIDO ATUAL:\n${entrada.pergunta}\n`;
+}
+
+// Rede de segurança: tira aberturas e fechamentos típicos de IA que escaparem.
+export function limparEstilo(texto) {
+  const linhas = texto.trim().split("\n");
+  const abertura = /^(claro|certo|certamente|com certeza|ótima pergunta|excelente pergunta|perfeito)\b[^\n]{0,80}[!.:]\s*$/i;
+  const fecho = /^(espero (ter ajudado|que isso (te )?ajude)|se (precisar|quiser|tiver)|fico à disposição|qualquer dúvida|posso ajudar)[^\n]*$/i;
+  while (linhas.length && abertura.test(linhas[0].trim())) linhas.shift();
+  while (linhas.length && (fecho.test(linhas.at(-1).trim()) || !linhas.at(-1).trim())) linhas.pop();
+  return linhas.join("\n").trim();
 }
 
 function extrairJSON(texto) {
@@ -316,16 +344,15 @@ Seja objetivo; não reescreva o que já está bom. Se não houver nada a acresce
     "sintese",
     "Resposta final",
     coord,
-    regras(cfg) + "\n\nSeu papel agora: redigir a RESPOSTA FINAL ÚNICA da equipe.",
-    `${base}\nPLANO:\n${resumoPlano}\nFormato desejado: ${plano.formato_final || "o mais útil para a demanda"}\n
-MATERIAL PRODUZIDO PELA EQUIPE:\n${material}\n
-Funda tudo numa única resposta, como se fosse escrita por um só especialista:
-1. Comece com a resposta direta (3 a 5 linhas).
-2. Desenvolva com a melhor parte de cada contribuição, sem repetições.
-3. Incorpore as correções dos complementos. Onde houve divergência, diga qual posição foi adotada e por quê.
-4. Termine com "Pontos a verificar" (o que depende de confirmação em campo, norma ou fabricante) e as fontes citadas.
-Não descreva o processo interno da equipe, exceto nas divergências.`,
+    regras(cfg) + "\n\nSeu papel agora: escrever o texto final que o usuário vai ler.\n\n" + ESTILO,
+    `${base}\nPLANO:\n${resumoPlano}\nFormato desejado: ${plano.formato_final || "o mais útil para o pedido"}\n
+MATERIAL PRODUZIDO:\n${material}\n
+Escreva o texto final como se fosse de um único engenheiro experiente:
+- Comece pela resposta ou pela entrega pedida, sem rodeios.
+- Use o melhor de cada contribuição, já com as correções dos complementos, sem repetir nada.
+- Se houve divergência técnica que muda a decisão, explique em uma ou duas frases qual caminho seguir e por quê.
+- No fim, se houver, uma seção curta "Confirmar antes de aplicar" (o que depende de campo, norma ou fabricante) e as fontes usadas.`,
   );
 
-  return { resposta: final.texto, plano, resultados, complementos };
+  return { resposta: limparEstilo(final.texto), plano, resultados, complementos };
 }

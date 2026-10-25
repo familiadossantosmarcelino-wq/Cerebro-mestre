@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Cérebro Mestre</title>
-  <meta name="description" content="Claude e GPT trabalhando juntos numa resposta única.">
+  <meta name="description" content="Projetos desenvolvidos por Claude e GPT em conjunto.">
   <meta name="theme-color" content="#1f3a5f">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -13,106 +13,125 @@
 </head>
 <body>
   <header class="topo">
-    <div class="marca">
+    <a class="marca" href="#/">
       <img src="icon.svg" alt="" width="28" height="28">
       <span>Cérebro Mestre</span>
-    </div>
+    </a>
     <nav>
-      <button id="btn-historico" class="icone" title="Histórico" aria-label="Histórico">🕘</button>
       <button id="btn-config" class="icone" title="Configurações" aria-label="Configurações">⚙️</button>
     </nav>
   </header>
 
   <main>
-    <section class="entrada">
-      <label class="projeto">
-        Projeto
-        <input id="projeto" list="lista-projetos" placeholder="geral" autocomplete="off">
-        <datalist id="lista-projetos"></datalist>
-      </label>
-      <textarea id="pergunta" rows="5" placeholder="Digite sua dúvida ou demanda. Claude e GPT vão dividir o trabalho, pesquisar e devolver uma resposta única."></textarea>
-      <div class="acoes">
-        <span id="aviso-modo" class="dica"></span>
-        <button id="btn-parar" class="secundario" hidden>Parar</button>
-        <button id="btn-resolver" class="primario">Resolver</button>
+    <!-- Lista de projetos -->
+    <section id="tela-projetos">
+      <div class="cabecalho">
+        <h1>Projetos</h1>
+        <button id="btn-novo" class="primario">+ Novo projeto</button>
+      </div>
+      <p id="aviso-modo" class="dica"></p>
+      <ul id="lista-projetos" class="projetos"></ul>
+      <div class="rodape-acoes">
+        <button id="btn-backup" class="secundario">Fazer backup</button>
+        <label class="secundario botao-arquivo">Restaurar backup<input id="arq-backup" type="file" accept=".json" hidden></label>
       </div>
     </section>
 
-    <section id="resultado" hidden>
-      <article class="cartao final">
-        <header>
-          <h2>Resposta</h2>
-          <div class="ferramentas">
-            <button id="btn-copiar" class="secundario">Copiar</button>
-            <button id="btn-baixar" class="secundario">Baixar .md</button>
-          </div>
-        </header>
-        <div id="resposta" class="md"><p class="dica">As IAs estão trabalhando… acompanhe abaixo.</p></div>
-      </article>
-
-      <details id="bastidores" open>
-        <summary>Como a equipe chegou aqui</summary>
-        <ol id="etapas" class="etapas"></ol>
+    <!-- Um projeto -->
+    <section id="tela-projeto" hidden>
+      <a href="#/" class="voltar">← Projetos</a>
+      <div class="cabecalho">
+        <h1 id="p-nome"></h1>
+        <div class="ferramentas">
+          <button id="btn-arquivo" class="secundario">Baixar arquivo</button>
+          <button id="btn-editar" class="secundario">Editar</button>
+        </div>
+      </div>
+      <details class="objetivo">
+        <summary>Objetivo do projeto</summary>
+        <div id="p-objetivo" class="md"></div>
       </details>
+
+      <ol id="linha" class="linha"></ol>
+
+      <div class="entrada">
+        <textarea id="pergunta" rows="3" placeholder="O que precisa agora neste projeto? Ex.: monte o checklist de campo, revise o fluxo, crie o formulário…"></textarea>
+        <div class="acoes">
+          <button id="btn-parar" class="secundario" hidden>Parar</button>
+          <button id="btn-resolver" class="primario">Enviar</button>
+        </div>
+      </div>
     </section>
   </main>
 
-  <dialog id="dlg-config">
+  <template id="tpl-entrada">
+    <li class="entrada-projeto">
+      <div class="pedido"></div>
+      <article class="cartao">
+        <div class="resposta md"></div>
+        <div class="ferramentas pe">
+          <button class="secundario copiar">Copiar</button>
+          <button class="secundario apagar">Apagar</button>
+        </div>
+      </article>
+      <details class="bastidores">
+        <summary>Como foi feito</summary>
+        <ol class="etapas"></ol>
+      </details>
+    </li>
+  </template>
+
+  <dialog id="dlg-projeto">
     <form method="dialog" class="formulario">
-      <h2>Configurações</h2>
-      <p class="dica">As chaves ficam salvas só neste aparelho e vão direto para a Anthropic e a OpenAI.</p>
-
-      <fieldset>
-        <legend>Claude (Anthropic)</legend>
-        <label>Chave de API <input name="chaveClaude" type="password" autocomplete="off" placeholder="sk-ant-..."></label>
-        <label>Modelo <input name="modeloClaude"></label>
-      </fieldset>
-
-      <fieldset>
-        <legend>GPT (OpenAI)</legend>
-        <label>Chave de API <input name="chaveGPT" type="password" autocomplete="off" placeholder="sk-..."></label>
-        <label>Modelo <input name="modeloGPT"></label>
-      </fieldset>
-
-      <fieldset>
-        <legend>Equipe</legend>
-        <label>Coordenador (divide o trabalho e escreve a resposta final)
-          <select name="coordenador">
-            <option value="claude">Claude</option>
-            <option value="gpt">GPT</option>
-          </select>
-        </label>
-        <label class="check"><input type="checkbox" name="pesquisaWeb"> Pesquisar na web</label>
-        <label class="check"><input type="checkbox" name="complemento"> Complemento cruzado (uma IA completa a outra)</label>
-        <label class="check"><input type="checkbox" name="simular"> Modo simulação (testa sem gastar API)</label>
-      </fieldset>
-
-      <fieldset>
-        <legend>Seu perfil</legend>
-        <textarea name="perfil" rows="3"></textarea>
-      </fieldset>
-
-      <fieldset>
-        <legend>Contexto do projeto atual</legend>
-        <textarea name="contextoProjeto" rows="4" placeholder="Ex.: planta com 12 bombas API 610, rotas de vibração mensais..."></textarea>
-      </fieldset>
-
+      <h2 id="dlg-projeto-titulo">Novo projeto</h2>
+      <label>Nome <input name="nome" required maxlength="80" placeholder="Ex.: Padrinhos de Máquinas"></label>
+      <label>Objetivo e contexto
+        <textarea name="objetivo" rows="7" placeholder="O que é o projeto, onde será aplicado, quem participa, restrições, o que você precisa entregar…"></textarea>
+      </label>
+      <p class="dica" id="dlg-projeto-dica">Ao criar, as duas IAs já analisam e devolvem a estrutura inicial do projeto.</p>
       <div class="acoes">
+        <button value="excluir" class="perigo" id="btn-excluir" formnovalidate hidden>Excluir projeto</button>
         <button value="cancelar" class="secundario" formnovalidate>Cancelar</button>
         <button value="salvar" class="primario">Salvar</button>
       </div>
     </form>
   </dialog>
 
-  <dialog id="dlg-historico">
-    <div class="formulario">
-      <h2>Histórico</h2>
-      <ul id="lista-historico" class="historico"></ul>
+  <dialog id="dlg-config">
+    <form method="dialog" class="formulario">
+      <h2>Configurações</h2>
+      <p class="dica">As chaves ficam salvas só neste aparelho e vão direto para a Anthropic e a OpenAI.</p>
+      <fieldset>
+        <legend>Claude (Anthropic)</legend>
+        <label>Chave de API <input name="chaveClaude" type="password" autocomplete="off" placeholder="sk-ant-..."></label>
+        <label>Modelo <input name="modeloClaude"></label>
+      </fieldset>
+      <fieldset>
+        <legend>GPT (OpenAI)</legend>
+        <label>Chave de API <input name="chaveGPT" type="password" autocomplete="off" placeholder="sk-..."></label>
+        <label>Modelo <input name="modeloGPT"></label>
+      </fieldset>
+      <fieldset>
+        <legend>Trabalho em dupla</legend>
+        <label>Quem escreve o texto final
+          <select name="coordenador">
+            <option value="claude">Claude</option>
+            <option value="gpt">GPT</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" name="pesquisaWeb"> Pesquisar na web</label>
+        <label class="check"><input type="checkbox" name="complemento"> Uma IA completa a parte da outra</label>
+        <label class="check"><input type="checkbox" name="simular"> Modo simulação (testa sem gastar)</label>
+      </fieldset>
+      <fieldset>
+        <legend>Seu perfil</legend>
+        <textarea name="perfil" rows="3"></textarea>
+      </fieldset>
       <div class="acoes">
-        <button id="btn-limpar-historico" class="secundario">Limpar tudo</button>
-        <button id="btn-fechar-historico" class="primario">Fechar</button>
+        <button value="cancelar" class="secundario" formnovalidate>Cancelar</button>
+        <button value="salvar" class="primario">Salvar</button>
       </div>
-    </div>
+    </form>
   </dialog>
 
   <script type="module" src="app.js"></script>
