@@ -18,6 +18,7 @@
       <span>Cérebro Mestre</span>
     </a>
     <nav>
+      <button id="btn-nuvem" class="nuvem" data-estado="desligada" title="Nuvem"><span class="ponto"></span><span id="nuvem-texto">Sem nuvem</span></button>
       <button id="btn-config" class="icone" title="Configurações" aria-label="Configurações">⚙️</button>
     </nav>
   </header>
@@ -111,6 +112,16 @@
         <label>Chave de API <input name="chaveGPT" type="password" autocomplete="off" placeholder="sk-..."></label>
         <label>Modelo <input name="modeloGPT"></label>
       </fieldset>
+      <fieldset>
+        <legend>Nuvem (celular, tablet e computador juntos)</legend>
+        <p class="dica">Usa um repositório <b>privado</b> do seu GitHub para guardar os projetos. Faça isso uma vez em cada aparelho. Passo a passo no README.</p>
+        <label>Repositório de dados <input name="repo" autocomplete="off" placeholder="seu-usuario/cerebro-dados"></label>
+        <label>Token do GitHub <input name="token" type="password" autocomplete="off" placeholder="github_pat_..."></label>
+        <label>Senha das chaves (opcional)
+          <input name="senha" type="password" autocomplete="new-password" placeholder="Para levar as chaves de API aos outros aparelhos">
+        </label>
+      </fieldset>
+
       <fieldset>
         <legend>Trabalho em dupla</legend>
         <label>Quem escreve o texto final

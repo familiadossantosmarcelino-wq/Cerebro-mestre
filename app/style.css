@@ -144,3 +144,11 @@ h1 { font-size: 1.4rem; margin: 0; }
 
 #tela-projeto .entrada { position: sticky; bottom: 0; padding: 10px 0 max(10px, env(safe-area-inset-bottom)); background: var(--fundo); }
 .formulario > label { display: grid; gap: 4px; font-size: .9rem; color: var(--suave); }
+
+.topo nav { display: flex; align-items: center; gap: 4px; }
+.nuvem { display: flex; align-items: center; gap: 6px; padding: 5px 10px; font-size: .82rem; border-radius: 999px; color: var(--suave); }
+.nuvem .ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--suave); }
+.nuvem[data-estado="ok"] .ponto { background: var(--gpt); }
+.nuvem[data-estado="rodando"] .ponto { background: var(--primaria); animation: pulsar 1s infinite; }
+.nuvem[data-estado="erro"] .ponto { background: var(--erro); }
+.nuvem[data-estado="offline"] .ponto { background: var(--claude); }

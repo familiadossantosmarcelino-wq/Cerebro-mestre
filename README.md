@@ -75,8 +75,8 @@ Defina um **limite de gasto mensal** nos dois painéis. Cada pedido faz cerca de
 3. O workflow `Publicar app` publica a pasta `app/`. O endereço aparece na aba *Actions*.
 4. No celular, abra o endereço e use *"Adicionar à tela inicial"*.
 
-> Em conta gratuita, o GitHub Pages exige repositório público. Suas chaves e
-> projetos não ficam no código, só no seu aparelho. Para manter o repositório
+> Em conta gratuita, o GitHub Pages exige que o repositório **do app** seja público.
+> Seus projetos e chaves nunca ficam nele: ficam no repositório privado de dados. Para manter o repositório
 > privado, publique a pasta `app/` na Netlify ou na Cloudflare Pages (gratuitos).
 
 **Só no computador**
@@ -84,15 +84,58 @@ Defina um **limite de gasto mensal** nos dois painéis. Cada pedido faz cerca de
 cd app && python3 -m http.server 8000   # abra http://localhost:8000
 ```
 
-## Onde ficam os dados (importante)
+## Nuvem: celular, tablet e computador juntos
 
-Projetos e chaves ficam **no navegador do aparelho**. Não sincronizam entre
-celular e computador, e somem se você limpar os dados do navegador. Use
-**Fazer backup** (tela de projetos) com frequência; **Restaurar backup** traz os
-projetos de volta em qualquer aparelho.
+Tudo o que você faz num aparelho aparece nos outros. Os projetos ficam guardados
+num **repositório privado do seu GitHub**, um separado só para dados (não é o
+repositório do app).
 
-Quem tiver acesso ao seu navegador desbloqueado consegue ler as chaves. Mantenha o
-limite de gasto e, se perder o aparelho, revogue as chaves nos painéis.
+O que isso te dá:
+- **Sincroniza sozinho** ao abrir o app, ao voltar para ele, quando a internet
+  volta e a cada 2 minutos. O indicador no topo mostra *Sincronizado*, *Offline* ou *Falha*.
+- **Funciona sem internet em campo**: fica salvo no aparelho e sobe quando o sinal voltar.
+- **Nada se perde**: se dois aparelhos mexerem no mesmo projeto, os registros são
+  somados. Excluir um projeto num aparelho exclui em todos.
+- **Cada projeto é uma pasta** (`projetos/padrinhos-de-maquinas/`) com o arquivo
+  `projeto.md` legível. Dá para ler pelo app do GitHub e todo o histórico de
+  alterações fica guardado.
+- **Chaves de API**: se você definir uma *senha das chaves*, elas sobem cifradas
+  (ninguém lê sem a senha) e os outros aparelhos recebem sozinhos.
+
+### Configurar (uma vez)
+
+**1. Criar o repositório de dados** (no GitHub, pelo navegador)
+- *New repository* → nome `cerebro-dados` → marque **Private** → marque
+  *Add a README file* → *Create repository*.
+
+**2. Criar o token de acesso** (dá acesso só a esse repositório)
+- Foto do perfil → *Settings* → *Developer settings* → *Personal access tokens* →
+  *Fine-grained tokens* → *Generate new token*.
+- *Token name*: `Cérebro Mestre`. *Expiration*: o maior prazo que preferir.
+- *Repository access*: **Only select repositories** → `cerebro-dados`.
+- *Permissions* → *Repository permissions* → **Contents: Read and write**.
+- *Generate token* e copie (começa com `github_pat_`).
+
+**3. Em cada aparelho** (celular, tablet, computador), no app → ⚙️ → *Nuvem*:
+- Repositório de dados: `seu-usuario/cerebro-dados`
+- Token do GitHub: o token copiado
+- Senha das chaves: **a mesma em todos os aparelhos**
+
+No primeiro aparelho, coloque também as chaves de API do Claude e do GPT. Nos
+outros, basta repositório, token e senha: as chaves chegam sozinhas.
+
+### Segurança
+- O token só acessa o repositório `cerebro-dados`, e só o conteúdo dele.
+- As chaves de API vão cifradas com a sua senha (AES-256). Sem a senha, o arquivo
+  na nuvem é ilegível.
+- Em cada aparelho, token e chaves ficam no navegador. Quem usar o aparelho
+  desbloqueado consegue acessá-los. Se perder um aparelho, revogue o token no
+  GitHub e as chaves nos painéis da Anthropic e da OpenAI.
+- Mantenha um limite de gasto mensal nas APIs.
+
+### Sem nuvem
+Sem a nuvem configurada, tudo fica só no aparelho. Use *Fazer backup* e
+*Restaurar backup* na tela de projetos para não perder nada.
 
 ## Configurações (⚙️)
 
@@ -110,7 +153,8 @@ limite de gasto e, se perder o aparelho, revogue as chaves nos painéis.
 | Arquivo | Função |
 |---|---|
 | `app/cerebro.js` | Trabalho em dupla (5 etapas), regras de escrita e chamadas às APIs |
-| `app/app.js` | Projetos, linha do tempo, arquivo do projeto, backup e configurações |
+| `app/app.js` | Projetos, linha do tempo, arquivo do projeto, sincronização, backup e configurações |
+| `app/nuvem.js` | Leitura/gravação no GitHub, mescla entre aparelhos e cifra das chaves |
 | `app/markdown.js` | Exibe o texto formatado (tabelas, listas) de forma segura |
 | `app/sw.js`, `manifest.webmanifest` | Instalação como app e abertura offline |
 | `.github/workflows/pages.yml` | Publicação automática no GitHub Pages |

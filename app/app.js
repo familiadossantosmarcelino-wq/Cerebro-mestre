@@ -1,5 +1,6 @@
 import { resolver, NOMES } from "./cerebro.js";
 import { markdown } from "./markdown.js";
+import { Nuvem, mesclar, iguais, cifrar, decifrar } from "./nuvem.js";
 
 const $ = (s, raiz = document) => raiz.querySelector(s);
 
@@ -18,13 +19,17 @@ const PADRAO = {
 };
 
 // Projetos iniciais: só nome e um rascunho do objetivo, para o usuário completar.
+// Ids fixos: o mesmo projeto inicial criado em dois aparelhos vira um só na nuvem.
+const DATA_INICIAL = "2026-01-01T00:00:00.000Z";
 const INICIAIS = [
   {
+    id: "inicial-padrinhos",
     nome: "Padrinhos de Máquinas",
     objetivo:
       "Programa em que cada máquina tem um padrinho responsável por acompanhar sua condição, cuidados básicos e anomalias.\n\n(Complete: área/planta, quais máquinas, quem serão os padrinhos, o que se espera deles, como medir o resultado.)",
   },
   {
+    id: "inicial-oms",
     nome: "Preenchimento de OMs em Campo",
     objetivo:
       "Padronizar e facilitar o preenchimento das ordens de manutenção (OMs) em campo, para que as informações cheguem completas e corretas.\n\n(Complete: sistema usado (SAP PM, outro), problemas atuais no preenchimento, quem preenche, campos obrigatórios.)",
@@ -51,17 +56,32 @@ function gravar(chave, valor) {
 
 const novoId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
+const nomeArquivo = (t) =>
+  t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "projeto";
+
 let cfg = { ...PADRAO, ...ler("cerebro.cfg", {}) };
 let projetos = ler("cerebro.projetos", null);
 if (!projetos) {
-  projetos = INICIAIS.map((p) => ({ id: novoId(), ...p, criado: new Date().toISOString(), entradas: [] }));
+  projetos = INICIAIS.map((p) => ({ ...p, criado: DATA_INICIAL, atualizado: DATA_INICIAL, entradas: [] }));
   gravar("cerebro.projetos", projetos);
 }
+// Cada projeto tem uma pasta própria na nuvem.
+for (const p of projetos) p.pasta ||= p.id.startsWith("inicial-") ? `${nomeArquivo(p.nome)}` : `${nomeArquivo(p.nome)}-${p.id}`;
+let excluidos = ler("cerebro.excluidos", []);
+let conexao = ler("cerebro.nuvem", { token: "", repo: "", senha: "" });
 
 // Guarda os bastidores só das últimas respostas de cada projeto, para não lotar a memória.
 function salvarProjetos() {
   for (const p of projetos) p.entradas.forEach((e, i) => i < p.entradas.length - 5 && delete e.etapas);
   gravar("cerebro.projetos", projetos);
+}
+
+// Toda alteração num projeto passa por aqui: salva no aparelho e manda para a nuvem.
+function alterou(p, { meta = false } = {}) {
+  if (meta) p.atualizado = new Date().toISOString();
+  p.pendente = true;
+  salvarProjetos();
+  enviarProjeto(p);
 }
 
 let atual = null;
@@ -74,8 +94,18 @@ function rota() {
   atual = m ? projetos.find((p) => p.id === m[1]) : null;
   $("#tela-projetos").hidden = !!atual;
   $("#tela-projeto").hidden = !atual;
+  $("#pergunta").value = "";
   atual ? telaProjeto() : telaProjetos();
   window.scrollTo(0, 0);
+}
+
+// Redesenha depois de uma sincronização sem mexer no que você está digitando.
+function redesenhar() {
+  if (controle) return;
+  const id = atual?.id;
+  atual = id ? projetos.find((p) => p.id === id) : null;
+  if (id && !atual) return (location.hash = "#/");
+  atual ? telaProjeto() : telaProjetos();
 }
 
 function telaProjetos() {
@@ -112,7 +142,6 @@ function telaProjeto() {
     $("#btn-iniciar").onclick = () => enviar(pedidoInicial(atual), "Analisar e estruturar o projeto");
   }
   for (const e of atual.entradas) linha.appendChild(desenharEntrada(e));
-  $("#pergunta").value = "";
 }
 
 function pedidoInicial() {
@@ -134,7 +163,8 @@ function desenharEntrada(e) {
   $(".apagar", li).onclick = () => {
     if (!confirm("Apagar este registro do projeto?")) return;
     atual.entradas = atual.entradas.filter((x) => x !== e);
-    salvarProjetos();
+    atual.removidas = [...(atual.removidas || []), e.id];
+    alterou(atual);
     telaProjeto();
   };
   return li;
@@ -193,8 +223,9 @@ async function enviar(pergunta, rotulo) {
     }, controle.signal);
     registro.resposta = r.resposta;
     registro.etapas = Object.values(etapas);
-    projeto.entradas.push(registro);
-    salvarProjetos();
+    const alvo = projetos.find((p) => p.id === projeto.id) || projeto;
+    alvo.entradas.push(registro);
+    alterou(alvo);
     $(".resposta", li).innerHTML = markdown(r.resposta);
     $(".bastidores", li).open = false;
   } catch (e) {
@@ -218,9 +249,6 @@ function baixar(nome, conteudo, tipo) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-
-const nomeArquivo = (t) =>
-  t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 function arquivoProjeto(p) {
   const data = (d) => new Date(d).toLocaleString("pt-BR");
@@ -249,7 +277,10 @@ $("#dlg-projeto").addEventListener("close", () => {
   if (dlg.returnValue === "excluir" && p) {
     if (!confirm(`Excluir "${p.nome}" e todo o seu conteúdo? Faça um backup antes, se precisar.`)) return;
     projetos = projetos.filter((x) => x !== p);
+    excluidos = [...excluidos, p.id];
+    gravar("cerebro.excluidos", excluidos);
     salvarProjetos();
+    sincronizar();
     location.hash = "#/";
     return;
   }
@@ -259,12 +290,14 @@ $("#dlg-projeto").addEventListener("close", () => {
   if (!nome) return;
   if (p) {
     Object.assign(p, { nome, objetivo });
-    salvarProjetos();
+    alterou(p, { meta: true });
     rota();
   } else {
-    const novo = { id: novoId(), nome, objetivo, criado: new Date().toISOString(), entradas: [] };
+    const id = novoId();
+    const agora = new Date().toISOString();
+    const novo = { id, pasta: `${nomeArquivo(nome)}-${id}`, nome, objetivo, criado: agora, atualizado: agora, entradas: [] };
     projetos.push(novo);
-    salvarProjetos();
+    alterou(novo);
     location.hash = `#/p/${novo.id}`;
     // Projeto novo já começa sendo analisado.
     setTimeout(() => atual === novo && enviar(pedidoInicial(novo), "Analisar e estruturar o projeto"), 50);
@@ -279,21 +312,160 @@ function abrirConfig() {
     if (el.type === "checkbox") el.checked = v;
     else el.value = v;
   }
+  f.elements.token.value = conexao.token;
+  f.elements.repo.value = conexao.repo;
+  f.elements.senha.value = conexao.senha;
   $("#dlg-config").showModal();
 }
 
 $("#dlg-config").addEventListener("close", () => {
   if ($("#dlg-config").returnValue !== "salvar") return;
   const f = $("#dlg-config form");
+  const antes = JSON.stringify(Object.keys(PADRAO).map((k) => cfg[k]));
   for (const k of Object.keys(PADRAO)) {
     const el = f.elements[k];
     cfg[k] = el.type === "checkbox" ? el.checked : el.value.trim();
   }
   cfg.modeloClaude ||= PADRAO.modeloClaude;
   cfg.modeloGPT ||= PADRAO.modeloGPT;
+  // Só marca como "mais nova" se algo mudou de fato; senão um aparelho novo
+  // apagaria as chaves da nuvem com campos vazios.
+  if (JSON.stringify(Object.keys(PADRAO).map((k) => cfg[k])) !== antes) cfg.atualizado = new Date().toISOString();
   gravar("cerebro.cfg", cfg);
+
+  const nova = { token: f.elements.token.value.trim(), repo: f.elements.repo.value.trim(), senha: f.elements.senha.value };
+  const mudou = JSON.stringify(nova) !== JSON.stringify(conexao);
+  conexao = nova;
+  gravar("cerebro.nuvem", conexao);
+  if (mudou) conectar();
+  else enviarConfig();
   if (!atual) telaProjetos();
 });
+
+// ------------------------------------------------------------------ nuvem
+
+let nuvem = null;
+
+function estado(tipo, texto) {
+  const b = $("#btn-nuvem");
+  b.dataset.estado = tipo;
+  b.title = texto;
+  $("#nuvem-texto").textContent = { ok: "Sincronizado", rodando: "Sincronizando…", erro: "Falha", offline: "Offline", desligada: "Sem nuvem" }[tipo];
+}
+
+// Uma conexão por vez: abrir o app e voltar para ele ao mesmo tempo não duplica o trabalho.
+let conectando = null;
+function conectar() {
+  conectando ||= abrirConexao().finally(() => (conectando = null));
+  return conectando;
+}
+
+async function abrirConexao() {
+  nuvem = null;
+  if (!conexao.token || !conexao.repo) return estado("desligada", "Nuvem desligada. Configure em ⚙️ para usar em vários aparelhos.");
+  const n = new Nuvem(conexao);
+  estado("rodando", "Conectando…");
+  try {
+    await n.testar();
+  } catch (e) {
+    return estado(e.status === 0 && !navigator.onLine ? "offline" : "erro", `Nuvem: ${e.message}`);
+  }
+  nuvem = n;
+  await receberConfig();
+  await sincronizar();
+}
+
+// Chaves e preferências vão cifradas com a sua senha; sem senha, não sobem.
+async function receberConfig() {
+  if (!nuvem || !conexao.senha) return;
+  try {
+    const pacote = await nuvem.lerConfig();
+    if (!pacote) return enviarConfig();
+    const remoto = await decifrar(pacote, conexao.senha);
+    if ((remoto.atualizado || "") > (cfg.atualizado || "")) {
+      cfg = { ...cfg, ...remoto };
+      gravar("cerebro.cfg", cfg);
+      if (!atual) telaProjetos();
+    } else if ((remoto.atualizado || "") < (cfg.atualizado || "")) enviarConfig();
+  } catch (e) {
+    estado("erro", `Configurações da nuvem: ${e.message}`);
+  }
+}
+
+function enviarConfig() {
+  if (!nuvem || !conexao.senha) return;
+  nuvem.emSerie(async () => nuvem.salvarConfig(await cifrar(cfg, conexao.senha))).catch((e) => estado("erro", `Nuvem: ${e.message}`));
+}
+
+function enviarProjeto(p) {
+  if (!nuvem) return;
+  estado("rodando", "Enviando…");
+  nuvem
+    .emSerie(async () => {
+      const antes = JSON.stringify(p.entradas.map((e) => e.id));
+      const remoto = await nuvem.lerProjeto(p.pasta);
+      if (remoto) Object.assign(p, mesclar(p, remoto));
+      if (!remoto || !iguais(p, remoto)) await nuvem.salvarProjeto(p, arquivoProjeto(p));
+      p.pendente = false;
+      p.sincronizado = true;
+      salvarProjetos();
+      return antes !== JSON.stringify(p.entradas.map((e) => e.id));
+    })
+    .then((mudou) => {
+      estado("ok", `Sincronizado às ${new Date().toLocaleTimeString("pt-BR")}`);
+      if (mudou && atual === p) redesenhar();
+    })
+    .catch((e) => estado(e.status === 0 ? "offline" : "erro", `Ficou salvo neste aparelho e sobe depois. (${e.message})`));
+}
+
+let sincronizando = null;
+function sincronizar() {
+  if (!nuvem) return Promise.resolve();
+  if (sincronizando) return sincronizando;
+  estado("rodando", "Sincronizando…");
+  sincronizando = nuvem
+    .emSerie(async () => {
+      const antes = JSON.stringify(projetos.map((p) => [p.id, p.nome, p.objetivo, p.entradas.map((e) => e.id)]));
+      // Lista de excluídos fica na nuvem: excluir num aparelho vale para todos.
+      const naNuvem = await nuvem.lerExcluidos();
+      const apagados = new Set([...naNuvem, ...excluidos]);
+      if (apagados.size > naNuvem.length) await nuvem.salvarExcluidos([...apagados]);
+      let remotos = await nuvem.listarProjetos();
+      for (const r of remotos.filter((x) => apagados.has(x.id))) await nuvem.apagarProjeto(r);
+      remotos = remotos.filter((x) => !apagados.has(x.id));
+      excluidos = [];
+      gravar("cerebro.excluidos", excluidos);
+
+      const resultado = [];
+      for (const l of projetos.filter((x) => !apagados.has(x.id))) {
+        const r = remotos.find((x) => x.id === l.id);
+        if (!r) {
+          // Já esteve na nuvem e sumiu: foi excluído em outro aparelho.
+          if (l.sincronizado && !l.pendente) continue;
+          await nuvem.salvarProjeto(l, arquivoProjeto(l));
+        } else {
+          Object.assign(l, mesclar(l, r));
+          if (!iguais(l, r)) await nuvem.salvarProjeto(l, arquivoProjeto(l));
+        }
+        l.pendente = false;
+        l.sincronizado = true;
+        resultado.push(l);
+      }
+      for (const r of remotos) {
+        if (!resultado.some((p) => p.id === r.id)) resultado.push({ ...r, sincronizado: true });
+      }
+      projetos = resultado;
+      salvarProjetos();
+      return antes !== JSON.stringify(projetos.map((p) => [p.id, p.nome, p.objetivo, p.entradas.map((e) => e.id)]));
+    })
+    .then((mudou) => {
+      estado("ok", `Sincronizado às ${new Date().toLocaleTimeString("pt-BR")}`);
+      if (mudou) redesenhar();
+    })
+    .catch((e) => estado(e.status === 0 ? "offline" : "erro", `Ficou salvo neste aparelho e sobe depois. (${e.message})`))
+    .finally(() => (sincronizando = null));
+  return sincronizando;
+}
 
 // ------------------------------------------------------------------ eventos
 
@@ -317,11 +489,12 @@ $("#arq-backup").onchange = async (ev) => {
   if (!arq) return;
   try {
     const dados = JSON.parse(await arq.text());
+    for (const p of dados.projetos || []) p.pasta ||= `${nomeArquivo(p.nome || "projeto")}-${p.id}`;
     if (!Array.isArray(dados.projetos)) throw new Error("arquivo sem projetos");
     const ids = new Set(projetos.map((p) => p.id));
     const novos = dados.projetos.filter((p) => p.id && p.nome && Array.isArray(p.entradas) && !ids.has(p.id));
     projetos.push(...novos);
-    salvarProjetos();
+    novos.forEach((p) => alterou(p));
     alert(`${novos.length} projeto(s) restaurado(s). Projetos que já existiam foram mantidos como estão.`);
     telaProjetos();
   } catch (e) {
@@ -329,7 +502,15 @@ $("#arq-backup").onchange = async (ev) => {
   }
 };
 
+$("#btn-nuvem").onclick = () => (nuvem ? sincronizar() : conectar());
+
 window.addEventListener("hashchange", rota);
 rota();
+
+// Sincroniza ao abrir, ao voltar para o app, quando a internet volta e a cada 2 minutos.
+conectar();
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && (nuvem ? sincronizar() : conectar()));
+window.addEventListener("online", () => (nuvem ? sincronizar() : conectar()));
+setInterval(() => document.visibilityState === "visible" && nuvem && !controle && sincronizar(), 120000);
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
