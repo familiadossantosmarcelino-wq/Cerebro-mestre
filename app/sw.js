@@ -1,6 +1,6 @@
 // Mantém o app abrindo mesmo sem internet (as chamadas às IAs, claro, precisam de rede).
-const VERSAO = "cerebro-v3";
-const ARQUIVOS = ["./", "index.html", "style.css", "app.js", "cerebro.js", "markdown.js", "nuvem.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
+const VERSAO = "cerebro-v4";
+const ARQUIVOS = ["./", "index.html", "style.css", "app.js", "cerebro.js", "markdown.js", "nuvem.js", "firebase-config.js", "vendor/firebase.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSAO).then((c) => c.addAll(ARQUIVOS)));

@@ -1,241 +1,191 @@
-// Sincronização na nuvem usando um repositório PRIVADO do GitHub como armazenamento.
+// Nuvem com Firebase: login com Google (ou e-mail) e os dados sincronizados
+// entre celular, tablet e computador, inclusive sem internet (o Firestore guarda
+// tudo no aparelho e envia sozinho quando o sinal volta).
 //
-// Estrutura no repositório de dados:
-//   projetos/<nome-do-projeto>-<id>/projeto.json   ← dados completos (o app lê este)
-//   projetos/<nome-do-projeto>-<id>/projeto.md     ← o mesmo projeto, legível no GitHub
-//   config.enc.json                                 ← chaves de API cifradas com a sua senha
-//   excluidos.json                                  ← ids de projetos excluídos (vale para todos os aparelhos)
-//
-// Cada aparelho guarda uma cópia local e, ao sincronizar, as duas versões são
-// mescladas: registros novos de qualquer aparelho são somados, nada se sobrescreve.
+// Estrutura no Firestore (cada usuário só enxerga a própria pasta):
+//   usuarios/{uid}                                   ← configurações (chaves de API, modelos, perfil)
+//   usuarios/{uid}/projetos/{projeto}                ← nome, objetivo, datas
+//   usuarios/{uid}/projetos/{projeto}/entradas/{id}  ← cada pedido e resposta
 
-const API = "https://api.github.com";
+import { FIREBASE_CONFIG } from "./firebase-config.js";
 
-// ------------------------------------------------------------------ texto ↔ base64 (UTF-8)
+const EMULADOR = new URLSearchParams(location.search).has("emulador");
+const CONFIG = EMULADOR ? { apiKey: "demo", authDomain: "localhost", projectId: "demo-cerebro" } : FIREBASE_CONFIG;
 
-function paraBase64(texto) {
-  const bytes = new TextEncoder().encode(texto);
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(bin);
+export const nuvemDisponivel = !!CONFIG;
+
+let fb, auth, db, uid;
+let ouvintes = [];
+
+const MENSAGENS = {
+  "auth/invalid-credential": "e-mail ou senha incorretos",
+  "auth/wrong-password": "e-mail ou senha incorretos",
+  "auth/user-not-found": "conta não encontrada",
+  "auth/email-already-in-use": "já existe conta com esse e-mail; use Entrar",
+  "auth/weak-password": "senha fraca: use pelo menos 6 caracteres",
+  "auth/invalid-email": "e-mail inválido",
+  "auth/popup-closed-by-user": "login cancelado",
+  "auth/popup-blocked": "o navegador bloqueou a janela de login; libere pop-ups para este site",
+  "auth/unauthorized-domain": "este endereço não está autorizado no Firebase (Authentication → Settings → Authorized domains)",
+  "auth/network-request-failed": "sem conexão com a internet",
+};
+export const mensagemErro = (e) => MENSAGENS[e?.code] || e?.message || String(e);
+
+/**
+ * Liga a nuvem. Os callbacks recebem:
+ *  aoUsuario(usuario | null), aoProjetos(lista), aoConfig(config, atualizado, soDoCache), aoEstado(tipo, texto)
+ */
+export async function iniciarNuvem({ aoUsuario, aoProjetos, aoConfig, aoEstado }) {
+  if (!CONFIG) return;
+  fb = await import("./vendor/firebase.js");
+  const app = fb.initializeApp(CONFIG);
+  auth = fb.getAuth(app);
+  db = fb.initializeFirestore(app, {
+    localCache: fb.persistentLocalCache({ tabManager: fb.persistentMultipleTabManager() }),
+  });
+  if (EMULADOR) {
+    fb.connectAuthEmulator(auth, "http://localhost:9099", { disableWarnings: true });
+    fb.connectFirestoreEmulator(db, "localhost", 8080);
+  }
+
+  fb.onAuthStateChanged(auth, async (usuario) => {
+    ouvintes.forEach((parar) => parar());
+    ouvintes = [];
+    uid = usuario?.uid || null;
+    // Espera o app terminar de levar os projetos do aparelho antes de ler a nuvem,
+    // senão a lista aparece vazia por um instante.
+    await aoUsuario(usuario ? { uid, email: usuario.email, nome: usuario.displayName } : null);
+    if (usuario && uid === usuario.uid) observar({ aoProjetos, aoConfig, aoEstado });
+  });
 }
-function deBase64(b64) {
-  const bin = atob(b64.replace(/\s/g, ""));
-  return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
-}
 
-// ------------------------------------------------------------------ GitHub
+// ------------------------------------------------------------------ leitura em tempo real
 
-export class ErroNuvem extends Error {
-  constructor(msg, status) {
-    super(msg);
-    this.status = status;
-  }
-}
+function observar({ aoProjetos, aoConfig, aoEstado }) {
+  const projetos = new Map(); // id -> projeto
+  const pendentes = new Map(); // ouvinte -> tem gravação aguardando servidor
+  const deCache = new Map();
 
-export class Nuvem {
-  constructor({ token, repo }) {
-    this.token = token.trim();
-    this.repo = repo.trim().replace(/^https:\/\/github\.com\//, "").replace(/\.git$|\/$/g, "");
-    this.fila = Promise.resolve();
-  }
-
-  async req(metodo, caminho, corpo) {
-    let r;
-    try {
-      r = await fetch(`${API}/repos/${this.repo}${caminho}`, {
-        method: metodo,
-        cache: "no-store",
-        headers: {
-          authorization: `Bearer ${this.token}`,
-          accept: "application/vnd.github+json",
-          ...(corpo ? { "content-type": "application/json" } : {}),
-        },
-        body: corpo ? JSON.stringify(corpo) : undefined,
-      });
-    } catch {
-      throw new ErroNuvem("sem conexão com a internet", 0);
+  // Só redesenha quando os registros de todos os projetos já chegaram,
+  // para a lista não piscar "Ainda não iniciado" antes da hora.
+  const avisar = () => {
+    if ([...projetos.values()].some((p) => !p.carregado)) return;
+    const lista = [...projetos.values()].map(({ carregado, ...p }) => ({ ...p, entradas: [...p.entradas] }));
+    aoProjetos(lista);
+  };
+  const situacao = (chave, meta) => {
+    pendentes.set(chave, meta.hasPendingWrites);
+    deCache.set(chave, meta.fromCache);
+    if ([...pendentes.values()].some(Boolean)) {
+      aoEstado(navigator.onLine ? "rodando" : "offline", navigator.onLine ? "Enviando…" : "Sem internet: salvo no aparelho, envia quando o sinal voltar.");
+    } else if (!navigator.onLine) {
+      aoEstado("offline", "Sem internet: mostrando o que está salvo no aparelho.");
+    } else {
+      aoEstado("ok", `Sincronizado às ${new Date().toLocaleTimeString("pt-BR")}`);
     }
-    if (r.status === 404 && metodo === "GET") return null;
-    const dados = r.status === 204 ? {} : await r.json().catch(() => ({}));
-    if (!r.ok) {
-      const msg = { 401: "token inválido ou expirado", 403: "token sem permissão neste repositório", 404: "repositório não encontrado" }[r.status];
-      throw new ErroNuvem(msg || dados.message || `HTTP ${r.status}`, r.status);
-    }
-    return dados;
-  }
+  };
+  const erro = (e) => aoEstado("erro", `Nuvem: ${mensagemErro(e)}`);
 
-  // Escritas no mesmo repositório precisam ser uma de cada vez (senão o GitHub recusa).
-  emSerie(fn) {
-    const p = this.fila.then(fn);
-    this.fila = p.catch(() => {});
-    return p;
-  }
+  const pastaUsuario = fb.doc(db, "usuarios", uid);
+  ouvintes.push(
+    fb.onSnapshot(pastaUsuario, { includeMetadataChanges: true }, (snap) => {
+      situacao("usuario", snap.metadata);
+      const d = snap.data();
+      aoConfig(d?.config || null, d?.configAtualizado || "", snap.metadata.fromCache);
+    }, erro),
+  );
 
-  async testar() {
-    const r = await this.req("GET", "");
-    if (!r) throw new ErroNuvem("repositório não encontrado (confira o nome e o acesso do token)", 404);
-    if (!r.private) throw new ErroNuvem("o repositório de dados precisa ser PRIVADO", 0);
-    if (r.permissions && !r.permissions.push) throw new ErroNuvem("o token não tem permissão de escrita", 403);
-    return r;
-  }
+  const entradasOuvidas = new Map(); // projeto -> parar
+  ouvintes.push(() => entradasOuvidas.forEach((parar) => parar()));
 
-  async ler(caminho) {
-    const r = await this.req("GET", `/contents/${caminho}`);
-    if (!r) return null;
-    if (Array.isArray(r)) return { lista: r };
-    let conteudo = r.content;
-    // Arquivos acima de 1 MB vêm sem conteúdo: busca pelo blob.
-    if (!conteudo && r.sha) conteudo = (await this.req("GET", `/git/blobs/${r.sha}`)).content;
-    return { texto: deBase64(conteudo || ""), sha: r.sha };
-  }
-
-  async gravar(caminho, texto, mensagem) {
-    for (let tentativa = 0; tentativa < 3; tentativa++) {
-      const atual = await this.req("GET", `/contents/${caminho}`);
-      if (atual && !Array.isArray(atual) && atual.content && deBase64(atual.content) === texto) return;
-      try {
-        await this.req("PUT", `/contents/${caminho}`, {
-          message: mensagem,
-          content: paraBase64(texto),
-          ...(atual?.sha ? { sha: atual.sha } : {}),
-        });
-        return;
-      } catch (e) {
-        if (e.status !== 409 && e.status !== 422) throw e;
-        await new Promise((r) => setTimeout(r, 600 * (tentativa + 1)));
-      }
-    }
-    throw new ErroNuvem(`conflito ao gravar ${caminho}`, 409);
-  }
-
-  async apagar(caminho, mensagem) {
-    const atual = await this.req("GET", `/contents/${caminho}`);
-    if (!atual?.sha) return;
-    await this.req("DELETE", `/contents/${caminho}`, { message: mensagem, sha: atual.sha });
-  }
-
-  async listarProjetos() {
-    const raiz = await this.ler("projetos");
-    if (!raiz?.lista) return [];
-    const pastas = raiz.lista.filter((x) => x.type === "dir");
-    const lidos = await Promise.all(
-      pastas.map(async (d) => {
-        try {
-          return await this.lerProjeto(d.name);
-        } catch {
-          return null;
+  ouvintes.push(
+    fb.onSnapshot(fb.collection(pastaUsuario, "projetos"), { includeMetadataChanges: true }, (snap) => {
+      situacao("projetos", snap.metadata);
+      const vistos = new Set();
+      snap.forEach((d) => {
+        vistos.add(d.id);
+        const anterior = projetos.get(d.id);
+        projetos.set(d.id, { id: d.id, ...d.data(), entradas: anterior?.entradas || [], carregado: !!anterior?.carregado });
+        if (!entradasOuvidas.has(d.id)) {
+          entradasOuvidas.set(
+            d.id,
+            fb.onSnapshot(fb.collection(pastaUsuario, "projetos", d.id, "entradas"), { includeMetadataChanges: true }, (s) => {
+              situacao(`entradas-${d.id}`, s.metadata);
+              const p = projetos.get(d.id);
+              if (!p) return;
+              p.entradas = s.docs.map((x) => ({ id: x.id, ...x.data() })).sort((a, b) => a.data.localeCompare(b.data));
+              p.carregado = true;
+              avisar();
+            }, erro),
+          );
         }
-      }),
-    );
-    return lidos.filter(Boolean);
-  }
-
-  // Os métodos abaixo não entram na fila sozinhos: quem chama usa emSerie().
-  async lerProjeto(pasta) {
-    const arq = await this.ler(`projetos/${pasta}/projeto.json`);
-    return arq?.texto ? { ...JSON.parse(arq.texto), pasta } : null;
-  }
-
-  async salvarProjeto(projeto, markdownProjeto) {
-    const base = `projetos/${projeto.pasta}`;
-    await this.gravar(`${base}/projeto.json`, JSON.stringify(canonico(projeto), null, 1), `Atualiza ${projeto.nome}`);
-    await this.gravar(`${base}/projeto.md`, markdownProjeto, `Atualiza ${projeto.nome} (texto)`);
-  }
-
-  async apagarProjeto(projeto) {
-    const base = `projetos/${projeto.pasta}`;
-    await this.apagar(`${base}/projeto.json`, `Exclui ${projeto.nome}`);
-    await this.apagar(`${base}/projeto.md`, `Exclui ${projeto.nome} (texto)`);
-  }
-
-  async lerExcluidos() {
-    const arq = await this.ler("excluidos.json");
-    return arq?.texto ? JSON.parse(arq.texto) : [];
-  }
-
-  salvarExcluidos(ids) {
-    return this.gravar("excluidos.json", JSON.stringify(ids), "Atualiza lista de projetos excluídos");
-  }
-
-  async lerConfig() {
-    const arq = await this.ler("config.enc.json");
-    return arq?.texto ? JSON.parse(arq.texto) : null;
-  }
-
-  salvarConfig(cifrado) {
-    return this.gravar("config.enc.json", JSON.stringify(cifrado), "Atualiza configurações");
-  }
-}
-
-// ------------------------------------------------------------------ mescla
-
-// Formato fixo do que vai para a nuvem (sem campos só locais).
-export function canonico(p) {
-  return {
-    id: p.id,
-    pasta: p.pasta,
-    nome: p.nome,
-    objetivo: p.objetivo,
-    criado: p.criado,
-    atualizado: p.atualizado || p.criado,
-    removidas: [...new Set(p.removidas || [])].sort(),
-    entradas: p.entradas,
-  };
-}
-
-// Junta a versão deste aparelho com a da nuvem. Registros são somados;
-// nome/objetivo ficam com a versão editada por último; apagados não voltam.
-export function mesclar(local, remoto) {
-  if (!local) return { ...remoto, sincronizado: true };
-  if (!remoto) return local;
-  const removidas = new Set([...(local.removidas || []), ...(remoto.removidas || [])]);
-  const meta = (local.atualizado || local.criado) >= (remoto.atualizado || remoto.criado) ? local : remoto;
-  const porId = new Map();
-  for (const e of [...remoto.entradas, ...local.entradas]) {
-    const ja = porId.get(e.id);
-    porId.set(e.id, ja?.etapas && !e.etapas ? ja : e);
-  }
-  const entradas = [...porId.values()].filter((e) => !removidas.has(e.id)).sort((a, b) => a.data.localeCompare(b.data));
-  return {
-    ...canonico({ ...meta, removidas: [...removidas], entradas }),
-    pasta: remoto.pasta || local.pasta,
-    sincronizado: true,
-  };
-}
-
-export const iguais = (a, b) => JSON.stringify(canonico(a)) === JSON.stringify(canonico(b));
-
-// ------------------------------------------------------------------ cifra das chaves
-
-async function derivar(senha, sal) {
-  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(senha), "PBKDF2", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: sal, iterations: 250000, hash: "SHA-256" },
-    base,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"],
+      });
+      for (const id of [...projetos.keys()]) {
+        if (vistos.has(id)) continue;
+        projetos.delete(id);
+        entradasOuvidas.get(id)?.();
+        entradasOuvidas.delete(id);
+        pendentes.delete(`entradas-${id}`);
+      }
+      avisar();
+    }, erro),
   );
 }
 
-const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
-const deB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+// ------------------------------------------------------------------ login
 
-export async function cifrar(objeto, senha) {
-  const sal = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const chave = await derivar(senha, sal);
-  const dados = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, chave, new TextEncoder().encode(JSON.stringify(objeto)));
-  return { v: 1, sal: b64(sal), iv: b64(iv), dados: b64(dados) };
+export const entrarGoogle = () => fb.signInWithPopup(auth, new fb.GoogleAuthProvider());
+export const entrarEmail = (email, senha) => fb.signInWithEmailAndPassword(auth, email, senha);
+export const criarConta = (email, senha) => fb.createUserWithEmailAndPassword(auth, email, senha);
+export const recuperarSenha = (email) => fb.sendPasswordResetEmail(auth, email);
+export const sair = () => fb.signOut(auth);
+
+// ------------------------------------------------------------------ gravação
+// As gravações não esperam o servidor: com o aparelho offline elas ficam na fila
+// do Firestore e a tela já mostra o resultado na hora.
+
+const projetoRef = (id) => fb.doc(db, "usuarios", uid, "projetos", id);
+const entradaRef = (pid, eid) => fb.doc(db, "usuarios", uid, "projetos", pid, "entradas", eid);
+const semEsperar = (promessa, aoErro) => promessa.catch((e) => aoErro?.(mensagemErro(e)));
+
+export function salvarProjeto(p, aoErro) {
+  const { nome, objetivo, criado, atualizado } = p;
+  return semEsperar(fb.setDoc(projetoRef(p.id), { nome, objetivo, criado, atualizado: atualizado || criado }, { merge: true }), aoErro);
 }
 
-export async function decifrar(pacote, senha) {
+export function salvarEntrada(pid, e, aoErro) {
+  const { id, ...dados } = e;
+  return semEsperar(fb.setDoc(entradaRef(pid, id), JSON.parse(JSON.stringify(dados))), aoErro);
+}
+
+export const apagarEntrada = (pid, eid, aoErro) => semEsperar(fb.deleteDoc(entradaRef(pid, eid)), aoErro);
+
+export async function excluirProjeto(pid, aoErro) {
   try {
-    const chave = await derivar(senha, deB64(pacote.sal));
-    const claro = await crypto.subtle.decrypt({ name: "AES-GCM", iv: deB64(pacote.iv) }, chave, deB64(pacote.dados));
-    return JSON.parse(new TextDecoder().decode(claro));
-  } catch {
-    throw new ErroNuvem("senha das chaves incorreta", 0);
+    const entradas = await fb.getDocs(fb.collection(db, "usuarios", uid, "projetos", pid, "entradas"));
+    const lote = fb.writeBatch(db);
+    entradas.forEach((d) => lote.delete(d.ref));
+    lote.delete(projetoRef(pid));
+    semEsperar(lote.commit(), aoErro);
+  } catch (e) {
+    aoErro?.(mensagemErro(e));
+  }
+}
+
+export function salvarConfig(config, atualizado, aoErro) {
+  return semEsperar(fb.setDoc(fb.doc(db, "usuarios", uid), { config, configAtualizado: atualizado }, { merge: true }), aoErro);
+}
+
+// Primeiro login neste aparelho: leva para a nuvem o que já existia aqui.
+// Os projetos iniciais só sobem se a conta ainda não tem nada (conta nova).
+export async function migrar(projetosLocais, ehInicialSemUso) {
+  const pasta = fb.doc(db, "usuarios", uid);
+  const existente = await fb.getDoc(pasta).catch(() => null);
+  const contaNova = !existente?.exists();
+  if (contaNova) await fb.setDoc(pasta, { criado: new Date().toISOString() }, { merge: true });
+  for (const p of projetosLocais) {
+    if (!contaNova && ehInicialSemUso(p)) continue;
+    salvarProjeto(p);
+    for (const e of p.entradas) salvarEntrada(p.id, e);
   }
 }

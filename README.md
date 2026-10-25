@@ -75,8 +75,8 @@ Defina um **limite de gasto mensal** nos dois painéis. Cada pedido faz cerca de
 3. O workflow `Publicar app` publica a pasta `app/`. O endereço aparece na aba *Actions*.
 4. No celular, abra o endereço e use *"Adicionar à tela inicial"*.
 
-> Em conta gratuita, o GitHub Pages exige que o repositório **do app** seja público.
-> Seus projetos e chaves nunca ficam nele: ficam no repositório privado de dados. Para manter o repositório
+> Em conta gratuita, o GitHub Pages exige que o repositório do app seja público.
+> Seus projetos e chaves nunca ficam nele: ficam na sua conta do Firebase. Para manter o repositório
 > privado, publique a pasta `app/` na Netlify ou na Cloudflare Pages (gratuitos).
 
 **Só no computador**
@@ -84,58 +84,51 @@ Defina um **limite de gasto mensal** nos dois painéis. Cada pedido faz cerca de
 cd app && python3 -m http.server 8000   # abra http://localhost:8000
 ```
 
-## Nuvem: celular, tablet e computador juntos
+## Nuvem: celular, tablet e computador juntos (Firebase)
 
-Tudo o que você faz num aparelho aparece nos outros. Os projetos ficam guardados
-num **repositório privado do seu GitHub**, um separado só para dados (não é o
-repositório do app).
+Você entra com sua conta (Google ou e-mail) e os mesmos projetos aparecem em
+todos os aparelhos.
 
-O que isso te dá:
-- **Sincroniza sozinho** ao abrir o app, ao voltar para ele, quando a internet
-  volta e a cada 2 minutos. O indicador no topo mostra *Sincronizado*, *Offline* ou *Falha*.
-- **Funciona sem internet em campo**: fica salvo no aparelho e sobe quando o sinal voltar.
-- **Nada se perde**: se dois aparelhos mexerem no mesmo projeto, os registros são
-  somados. Excluir um projeto num aparelho exclui em todos.
-- **Cada projeto é uma pasta** (`projetos/padrinhos-de-maquinas/`) com o arquivo
-  `projeto.md` legível. Dá para ler pelo app do GitHub e todo o histórico de
-  alterações fica guardado.
-- **Chaves de API**: se você definir uma *senha das chaves*, elas sobem cifradas
-  (ninguém lê sem a senha) e os outros aparelhos recebem sozinhos.
+- **Tempo real**: o que você faz no computador aparece no celular na hora, sem atualizar.
+- **Funciona sem sinal em campo**: fica salvo no aparelho e sobe sozinho quando o
+  sinal volta. O indicador no topo mostra *Sincronizado*, *Enviando…* ou *Offline*.
+- **Nada se perde**: cada registro é guardado separado, então dois aparelhos
+  usando o mesmo projeto ao mesmo tempo não se atrapalham.
+- **Chaves de API**: você coloca uma vez; os outros aparelhos recebem sozinhos.
+- **Sem login** o app continua funcionando, só que os projetos ficam no aparelho.
+  Ao entrar pela primeira vez, o que já existia no aparelho sobe para a conta.
 
-### Configurar (uma vez)
+### Configurar o Firebase (uma vez, uns 10 minutos, plano gratuito)
 
-**1. Criar o repositório de dados** (no GitHub, pelo navegador)
-- *New repository* → nome `cerebro-dados` → marque **Private** → marque
-  *Add a README file* → *Create repository*.
+1. Acesse https://console.firebase.google.com com sua conta Google →
+   **Adicionar projeto** → nome `cerebro-mestre` → pode desativar o Google
+   Analytics → **Criar projeto**.
+2. **Authentication** → *Começar* → *Método de login*: ative **Google** e
+   **E-mail/senha**.
+3. **Authentication** → *Configurações* → *Domínios autorizados* → adicione o
+   endereço do app (ex.: `seu-usuario.github.io`).
+4. **Firestore Database** → *Criar banco de dados* → local
+   `southamerica-east1 (São Paulo)` → *modo de produção*. Depois, na aba
+   **Regras**, apague tudo, cole o conteúdo do arquivo `firestore.rules` deste
+   repositório e clique em **Publicar**.
+5. ⚙️ *Configurações do projeto* → *Seus apps* → ícone **Web** (`</>`) → apelido
+   `Cérebro` (não precisa de Hosting) → copie o bloco `firebaseConfig`.
+6. Cole esse bloco em `app/firebase-config.js` (ou mande para o Claude colocar).
+   Esses dados **não são secretos**: quem protege seus projetos é o login e as regras.
 
-**2. Criar o token de acesso** (dá acesso só a esse repositório)
-- Foto do perfil → *Settings* → *Developer settings* → *Personal access tokens* →
-  *Fine-grained tokens* → *Generate new token*.
-- *Token name*: `Cérebro Mestre`. *Expiration*: o maior prazo que preferir.
-- *Repository access*: **Only select repositories** → `cerebro-dados`.
-- *Permissions* → *Repository permissions* → **Contents: Read and write**.
-- *Generate token* e copie (começa com `github_pat_`).
-
-**3. Em cada aparelho** (celular, tablet, computador), no app → ⚙️ → *Nuvem*:
-- Repositório de dados: `seu-usuario/cerebro-dados`
-- Token do GitHub: o token copiado
-- Senha das chaves: **a mesma em todos os aparelhos**
-
-No primeiro aparelho, coloque também as chaves de API do Claude e do GPT. Nos
-outros, basta repositório, token e senha: as chaves chegam sozinhas.
+Pronto: em cada aparelho, abra o app e toque em **Entrar**.
 
 ### Segurança
-- O token só acessa o repositório `cerebro-dados`, e só o conteúdo dele.
-- As chaves de API vão cifradas com a sua senha (AES-256). Sem a senha, o arquivo
-  na nuvem é ilegível.
-- Em cada aparelho, token e chaves ficam no navegador. Quem usar o aparelho
-  desbloqueado consegue acessá-los. Se perder um aparelho, revogue o token no
-  GitHub e as chaves nos painéis da Anthropic e da OpenAI.
-- Mantenha um limite de gasto mensal nas APIs.
+- As regras do Firestore só deixam cada conta ler e gravar a própria pasta.
+  Outra pessoa que entrar no app não vê nada seu.
+- As chaves de API ficam na sua pasta da nuvem, protegidas pelo login. Quem tiver
+  acesso à sua conta Google tem acesso a elas: use verificação em duas etapas
+  na conta Google e mantenha um limite de gasto nas APIs.
+- Se perder um aparelho: troque a senha da conta e gere chaves de API novas.
 
-### Sem nuvem
-Sem a nuvem configurada, tudo fica só no aparelho. Use *Fazer backup* e
-*Restaurar backup* na tela de projetos para não perder nada.
+### Backup
+*Fazer backup* e *Restaurar backup* (tela de projetos) continuam disponíveis:
+geram e leem um arquivo `.json` com todos os projetos.
 
 ## Configurações (⚙️)
 
@@ -154,7 +147,10 @@ Sem a nuvem configurada, tudo fica só no aparelho. Use *Fazer backup* e
 |---|---|
 | `app/cerebro.js` | Trabalho em dupla (5 etapas), regras de escrita e chamadas às APIs |
 | `app/app.js` | Projetos, linha do tempo, arquivo do projeto, sincronização, backup e configurações |
-| `app/nuvem.js` | Leitura/gravação no GitHub, mescla entre aparelhos e cifra das chaves |
+| `app/nuvem.js` | Login e sincronização com o Firebase (tempo real e offline) |
+| `app/firebase-config.js` | Configuração do seu projeto Firebase |
+| `app/vendor/firebase.js` | Biblioteca do Firebase empacotada (gerada por `ferramentas/firebase-entrada.js`) |
+| `firestore.rules` | Regras de segurança: cada conta só acessa a própria pasta |
 | `app/markdown.js` | Exibe o texto formatado (tabelas, listas) de forma segura |
 | `app/sw.js`, `manifest.webmanifest` | Instalação como app e abertura offline |
 | `.github/workflows/pages.yml` | Publicação automática no GitHub Pages |
