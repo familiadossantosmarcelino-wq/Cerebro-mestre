@@ -1,5 +1,5 @@
 // Mantém o app abrindo mesmo sem internet (as chamadas às IAs, claro, precisam de rede).
-const VERSAO = "cerebro-v5";
+const VERSAO = "cerebro-v6";
 const ARQUIVOS = ["./", "index.html", "style.css", "app.js", "cerebro.js", "markdown.js", "nuvem.js", "firebase-config.js", "vendor/firebase.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {
