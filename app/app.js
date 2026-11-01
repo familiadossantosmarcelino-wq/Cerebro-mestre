@@ -508,6 +508,13 @@ nuvem
 
 // ------------------------------------------------------------------ eventos
 
+// Cancelar e Excluir não enviam o formulário. Assim o Enter dentro de um campo
+// aciona Salvar (o único botão de envio), e não Cancelar.
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-fechar]");
+  if (b) b.closest("dialog").close(b.dataset.fechar);
+});
+
 $("#btn-config").onclick = abrirConfig;
 $("#btn-novo").onclick = () => abrirProjeto(null);
 $("#btn-editar").onclick = () => abrirProjeto(atual);
