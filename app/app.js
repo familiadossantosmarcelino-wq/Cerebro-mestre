@@ -1,4 +1,4 @@
-import { resolver, NOMES } from "./cerebro.js";
+import { resolver, testarChaves, NOMES } from "./cerebro.js";
 import { markdown } from "./markdown.js";
 import * as nuvem from "./nuvem.js";
 
@@ -326,6 +326,7 @@ function abrirConfig() {
     else el.value = v;
   }
   desenharConta();
+  $("#teste-resultado").replaceChildren();
   $("#dlg-config").showModal();
 }
 
@@ -350,6 +351,57 @@ $("#dlg-config").addEventListener("close", () => {
 });
 
 const soConfig = () => Object.fromEntries(Object.keys(PADRAO).map((k) => [k, cfg[k]]));
+
+// ------------------------------------------------------------------ teste das chaves
+
+function linhaTeste(nome, r, campoModelo) {
+  const div = document.createElement("div");
+  div.className = `linha-teste ${r.ok ? "ok" : "erro"}`;
+  const t = document.createElement("p");
+  t.textContent = `${r.ok ? "✓" : "✗"} ${nome}: ${r.msg}`;
+  div.appendChild(t);
+  if (r.modelos?.length) {
+    const dica = document.createElement("p");
+    dica.className = "dica";
+    dica.textContent = "Modelos da sua conta. Toque em um para usar:";
+    const chips = document.createElement("div");
+    chips.className = "chips";
+    for (const id of r.modelos) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = id;
+      b.onclick = () => {
+        campoModelo.value = id;
+        dica.textContent = `Modelo trocado para ${id}. Toque em "Testar chaves" de novo e depois em Salvar.`;
+      };
+      chips.appendChild(b);
+    }
+    div.append(dica, chips);
+  }
+  return div;
+}
+
+$("#btn-testar").onclick = async () => {
+  const f = $("#dlg-config form");
+  const saida = $("#teste-resultado");
+  const botao = $("#btn-testar");
+  botao.disabled = true;
+  saida.textContent = "Testando as duas IAs…";
+  const r = await testarChaves({
+    chaveClaude: f.elements.chaveClaude.value.trim(),
+    modeloClaude: f.elements.modeloClaude.value.trim(),
+    chaveGPT: f.elements.chaveGPT.value.trim(),
+    modeloGPT: f.elements.modeloGPT.value.trim(),
+  });
+  saida.replaceChildren(linhaTeste("Claude", r.claude, f.elements.modeloClaude), linhaTeste("GPT", r.gpt, f.elements.modeloGPT));
+  if (r.claude.ok && r.gpt.ok) {
+    const fim = document.createElement("p");
+    fim.className = "dica";
+    fim.textContent = "As duas funcionam. Toque em Salvar.";
+    saida.appendChild(fim);
+  }
+  botao.disabled = false;
+};
 
 // ------------------------------------------------------------------ conta e nuvem
 

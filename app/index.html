@@ -105,7 +105,7 @@
   <dialog id="dlg-config">
     <form method="dialog" class="formulario">
       <h2>Configurações</h2>
-      <p class="dica">As chaves ficam salvas só neste aparelho e vão direto para a Anthropic e a OpenAI.</p>
+      <p class="dica">As chaves vão direto do seu aparelho para a Anthropic e a OpenAI. Quem entra com a conta guarda as chaves nela, e os outros aparelhos recebem sozinhos.</p>
       <fieldset>
         <legend>Claude (Anthropic)</legend>
         <label>Chave de API <input name="chaveClaude" type="password" autocomplete="off" placeholder="sk-ant-..."></label>
@@ -116,6 +116,11 @@
         <label>Chave de API <input name="chaveGPT" type="password" autocomplete="off" placeholder="sk-..."></label>
         <label>Modelo <input name="modeloGPT"></label>
       </fieldset>
+      <div class="teste">
+        <button type="button" id="btn-testar" class="secundario">Testar chaves</button>
+        <div id="teste-resultado" class="resultado-teste" aria-live="polite"></div>
+      </div>
+
       <fieldset id="conta" hidden>
         <legend>Conta (celular, tablet e computador juntos)</legend>
         <p id="conta-texto" class="dica"></p>

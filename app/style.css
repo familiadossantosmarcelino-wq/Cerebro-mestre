@@ -166,3 +166,12 @@ h1 { font-size: 1.4rem; margin: 0; }
 .formulario-email label { display: grid; gap: 4px; font-size: .9rem; color: var(--suave); }
 .link { border: none; background: none; color: var(--primaria); padding: 4px; margin-right: auto; font-size: .9rem; }
 .erro { color: var(--erro); min-height: 1.2em; margin: 0; font-size: .9rem; }
+
+.teste { display: grid; gap: 8px; }
+.resultado-teste { display: grid; gap: 8px; }
+.linha-teste { border: 1px solid var(--borda); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
+.linha-teste p { margin: 0; overflow-wrap: anywhere; }
+.linha-teste.ok { border-color: var(--gpt); }
+.linha-teste.erro { border-color: var(--erro); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { padding: 4px 10px; font-size: .85rem; border-radius: 999px; }

@@ -356,3 +356,67 @@ Escreva o texto final como se fosse de um único engenheiro experiente:
 
   return { resposta: limparEstilo(final.texto), plano, resultados, complementos };
 }
+
+// ------------------------------------------------------------------ teste das chaves
+
+async function getJSON(url, cabecalhos, sinal) {
+  const r = await fetch(url, { headers: cabecalhos, signal: sinal });
+  const dados = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ErroAPI(dados?.error?.message || `HTTP ${r.status}`, r.status);
+  return dados;
+}
+
+// Traduz o erro de uma API em uma frase que dá para agir.
+function explicar(nome, e, modelo) {
+  const msg = e.message || "erro desconhecido";
+  if (e instanceof TypeError || e.name === "AbortError") return `Não consegui falar com o ${nome}: sem internet, bloqueio do navegador ou demora demais.`;
+  if (e.status === 401) return `A chave do ${nome} não foi aceita. Confira se copiou inteira, sem espaço no começo ou no fim.`;
+  if (e.status === 403) return `A chave do ${nome} não tem permissão para isso. (${msg})`;
+  if (e.status === 404) return `O modelo "${modelo}" não existe ou não está liberado na sua conta do ${nome}.`;
+  if (e.status === 429 || /credit|billing|quota|balance/i.test(msg)) return `${nome}: sem crédito ou limite de uso atingido. Confira o saldo no painel de cobrança. (${msg})`;
+  return `${nome}: ${msg}`;
+}
+
+async function testarClaude(chave, modelo, sinal) {
+  await postJSON(
+    "https://api.anthropic.com/v1/messages",
+    { "x-api-key": chave, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+    { model: modelo, max_tokens: 256, output_config: { effort: "low" }, messages: [{ role: "user", content: "Responda só: ok" }] },
+    sinal,
+  );
+}
+
+// Modelos de texto da conta, para o usuário escolher quando o nome digitado não existe.
+const NAO_TEXTO = /audio|realtime|tts|transcribe|image|embed|moderation|dall|whisper|sora|search/i;
+
+async function testarGPT(chave, modelo, sinal) {
+  const cab = { authorization: `Bearer ${chave}` };
+  const lista = await getJSON("https://api.openai.com/v1/models", cab, sinal);
+  const ids = (lista.data || []).map((m) => m.id);
+  if (!ids.includes(modelo)) {
+    const modelos = ids.filter((id) => /gpt|^o\d/i.test(id) && !NAO_TEXTO.test(id)).sort().reverse().slice(0, 12);
+    return { ok: false, msg: `A chave está certa, mas o modelo "${modelo}" não aparece na sua conta da OpenAI.`, modelos };
+  }
+  await postJSON("https://api.openai.com/v1/responses", cab, { model: modelo, input: "Responda só: ok", max_output_tokens: 64 }, sinal);
+  return { ok: true, msg: `respondeu com o modelo ${modelo}.` };
+}
+
+async function rodarTeste(nome, chave, modelo, fn) {
+  if (!chave) return { ok: false, msg: `Cole a chave do ${nome} primeiro.` };
+  if (!modelo) return { ok: false, msg: `Preencha o nome do modelo do ${nome}.` };
+  try {
+    const r = await fn(chave, modelo, AbortSignal.timeout(30000));
+    return r || { ok: true, msg: `respondeu com o modelo ${modelo}.` };
+  } catch (e) {
+    return { ok: false, msg: explicar(nome, e, modelo) };
+  }
+}
+
+/** Faz uma chamada mínima a cada IA. Devolve {claude, gpt}, cada um com {ok, msg, modelos?}. */
+export async function testarChaves({ chaveClaude, modeloClaude, chaveGPT, modeloGPT }) {
+  const [claude, gpt] = await Promise.all([
+    rodarTeste("Claude", chaveClaude, modeloClaude, testarClaude),
+    rodarTeste("GPT", chaveGPT, modeloGPT, testarGPT),
+  ]);
+  return { claude, gpt };
+}
